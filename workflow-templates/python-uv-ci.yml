@@ -14,5 +14,5 @@ permissions:
 
 jobs:
   ci:
-    uses: znamlab/org-workflow-template/.github/workflows/python-uv-ci.yml@v1
+    uses: znamlab/org-workflow-template/.github/workflows/python-uv-ci.yml@v26.6.0
     secrets: inherit
