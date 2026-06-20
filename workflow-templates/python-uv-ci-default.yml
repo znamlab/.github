@@ -1,22 +1,12 @@
 name: Python uv CI
 
 on:
-  workflow_call:
-    inputs:
-      app_client_id:
-        description: Optional GitHub App client ID used for private dependency access.
-        required: false
-        type: string
-        default: ""
-      app_token_repositories:
-        description: Optional comma or newline-separated repositories the GitHub App token may access.
-        required: false
-        type: string
-        default: ""
-    secrets:
-      app_private_key:
-        description: Optional GitHub App private key used to create an installation token.
-        required: false
+  push:
+    paths-ignore:
+      - "**.md"
+  pull_request:
+    paths-ignore:
+      - "**.md"
 
 permissions:
   contents: read
@@ -31,24 +21,26 @@ jobs:
     runs-on: ubuntu-latest
     timeout-minutes: 30
 
-    # Do not expose the GitHub App private key / installation token to forked PR code.
-    # Same-repository PRs and non-PR events still run.
-    if: ${{ startsWith(github.event_name, 'pull_request') == false || github.event.pull_request.head.repo.full_name == github.repository }}
+    # If private dependencies are configured, do not expose the GitHub App
+    # private key / installation token to forked PR code.
+    #
+    # Repos without private dependencies can still run CI on forked PRs.
+    if: ${{ vars.APP_TOKEN_REPOSITORIES == '' || github.event_name != 'pull_request' || github.event.pull_request.head.repo.full_name == github.repository }}
 
     permissions:
       contents: read
 
     steps:
       - name: Validate private dependency configuration
-        if: ${{ inputs.app_token_repositories != '' }}
+        if: ${{ vars.APP_TOKEN_REPOSITORIES != '' }}
         env:
-          APP_CLIENT_ID: ${{ inputs.app_client_id }}
-          APP_PRIVATE_KEY: ${{ secrets.app_private_key }}
-          APP_TOKEN_REPOSITORIES: ${{ inputs.app_token_repositories }}
+          APP_CLIENT_ID: ${{ vars.APP_CLIENT_ID }}
+          APP_PRIVATE_KEY: ${{ secrets.APP_PRIVATE_KEY }}
+          APP_TOKEN_REPOSITORIES: ${{ vars.APP_TOKEN_REPOSITORIES }}
         run: |
-          test -n "$APP_CLIENT_ID" || { echo "::error::Missing input app_client_id because app_token_repositories was provided"; exit 1; }
-          test -n "$APP_PRIVATE_KEY" || { echo "::error::Missing secret app_private_key because app_token_repositories was provided"; exit 1; }
-          test -n "$APP_TOKEN_REPOSITORIES" || { echo "::error::Missing input app_token_repositories"; exit 1; }
+          test -n "$APP_CLIENT_ID" || { echo "::error::Missing variable APP_CLIENT_ID because APP_TOKEN_REPOSITORIES was provided"; exit 1; }
+          test -n "$APP_PRIVATE_KEY" || { echo "::error::Missing secret APP_PRIVATE_KEY because APP_TOKEN_REPOSITORIES was provided"; exit 1; }
+          test -n "$APP_TOKEN_REPOSITORIES" || { echo "::error::Missing variable APP_TOKEN_REPOSITORIES"; exit 1; }
 
       - name: Checkout
         uses: actions/checkout@v6
@@ -64,23 +56,23 @@ jobs:
         run: uv python install
 
       - name: Create GitHub App token
-        if: ${{ inputs.app_token_repositories != '' }}
+        if: ${{ vars.APP_TOKEN_REPOSITORIES != '' }}
         uses: actions/create-github-app-token@v3
         id: app-token
         with:
-          client-id: ${{ inputs.app_client_id }}
-          private-key: ${{ secrets.app_private_key }}
+          client-id: ${{ vars.APP_CLIENT_ID }}
+          private-key: ${{ secrets.APP_PRIVATE_KEY }}
           owner: ${{ github.repository_owner }}
-          repositories: ${{ inputs.app_token_repositories }}
+          repositories: ${{ vars.APP_TOKEN_REPOSITORIES }}
           permission-contents: read
           skip-token-revoke: false
 
       - name: Sync dependencies
-        if: ${{ inputs.app_token_repositories == '' }}
+        if: ${{ vars.APP_TOKEN_REPOSITORIES == '' }}
         run: uv sync --frozen
 
       - name: Sync dependencies with private GitHub access
-        if: ${{ inputs.app_token_repositories != '' }}
+        if: ${{ vars.APP_TOKEN_REPOSITORIES != '' }}
         run: |
           token='${{ steps.app-token.outputs.token }}'
 
