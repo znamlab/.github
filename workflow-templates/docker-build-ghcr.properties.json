@@ -1,0 +1,14 @@
+{
+    "name": "Build and Publish Container Image",
+    "description": "Builds a Docker image on release publication and publishes it to GitHub Container Registry, with optional GitHub App access for private build-time dependencies.",
+    "iconName": "octicon package",
+    "categories": [
+        "deployment",
+        "Docker"
+    ],
+    "filePatterns": [
+        "^Dockerfile$",
+        "^Containerfile$",
+        "^\.dockerignore$"
+    ]
+}
