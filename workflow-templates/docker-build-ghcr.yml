@@ -1,4 +1,4 @@
-name: Docker Build
+name: Build
 
 on:
   release:
@@ -27,12 +27,14 @@ jobs:
         env:
           APP_CLIENT_ID: ${{ vars.APP_CLIENT_ID }}
           APP_PRIVATE_KEY: ${{ secrets.APP_PRIVATE_KEY }}
+          APP_TOKEN_REPOSITORIES: ${{ vars.APP_TOKEN_REPOSITORIES }}
         run: |
           test -n "$APP_CLIENT_ID" || { echo "::error::Missing variable APP_CLIENT_ID"; exit 1; }
           test -n "$APP_PRIVATE_KEY" || { echo "::error::Missing secret APP_PRIVATE_KEY"; exit 1; }
+          test -n "$APP_TOKEN_REPOSITORIES" || { echo "::error::Missing variable APP_TOKEN_REPOSITORIES"; exit 1; }
 
       - name: Checkout
-        uses: actions/checkout@v7
+        uses: actions/checkout@v6
         with:
           persist-credentials: false
 
@@ -43,9 +45,7 @@ jobs:
           client-id: ${{ vars.APP_CLIENT_ID }}
           private-key: ${{ secrets.APP_PRIVATE_KEY }}
           owner: ${{ github.repository_owner }}
-          repositories: |
-            iss-image
-            iss-registration
+          repositories: ${{ vars.APP_TOKEN_REPOSITORIES }}
           permission-contents: read
           skip-token-revoke: false
 
