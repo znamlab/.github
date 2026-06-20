@@ -4,17 +4,19 @@ on:
   workflow_call:
     inputs:
       app_client_id:
-        description: GitHub App client ID used for private dependency access.
-        required: true
+        description: Optional GitHub App client ID used for private dependency access.
+        required: false
         type: string
+        default: ""
       app_token_repositories:
-        description: Comma or newline-separated repositories the GitHub App token may access.
-        required: true
+        description: Optional comma or newline-separated repositories the GitHub App token may access.
+        required: false
         type: string
+        default: ""
     secrets:
       app_private_key:
-        description: GitHub App private key used to create an installation token.
-        required: true
+        description: Optional GitHub App private key used to create an installation token.
+        required: false
 
 permissions:
   contents: read
@@ -37,14 +39,15 @@ jobs:
       contents: read
 
     steps:
-      - name: Validate required configuration
+      - name: Validate private dependency configuration
+        if: ${{ inputs.app_token_repositories != '' }}
         env:
           APP_CLIENT_ID: ${{ inputs.app_client_id }}
           APP_PRIVATE_KEY: ${{ secrets.app_private_key }}
           APP_TOKEN_REPOSITORIES: ${{ inputs.app_token_repositories }}
         run: |
-          test -n "$APP_CLIENT_ID" || { echo "::error::Missing input app_client_id"; exit 1; }
-          test -n "$APP_PRIVATE_KEY" || { echo "::error::Missing secret app_private_key"; exit 1; }
+          test -n "$APP_CLIENT_ID" || { echo "::error::Missing input app_client_id because app_token_repositories was provided"; exit 1; }
+          test -n "$APP_PRIVATE_KEY" || { echo "::error::Missing secret app_private_key because app_token_repositories was provided"; exit 1; }
           test -n "$APP_TOKEN_REPOSITORIES" || { echo "::error::Missing input app_token_repositories"; exit 1; }
 
       - name: Checkout
@@ -61,6 +64,7 @@ jobs:
         run: uv python install
 
       - name: Create GitHub App token
+        if: ${{ inputs.app_token_repositories != '' }}
         uses: actions/create-github-app-token@v3
         id: app-token
         with:
@@ -72,6 +76,11 @@ jobs:
           skip-token-revoke: false
 
       - name: Sync dependencies
+        if: ${{ inputs.app_token_repositories == '' }}
+        run: uv sync --frozen
+
+      - name: Sync dependencies with private GitHub access
+        if: ${{ inputs.app_token_repositories != '' }}
         run: |
           token='${{ steps.app-token.outputs.token }}'
 
