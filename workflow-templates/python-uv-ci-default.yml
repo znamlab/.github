@@ -2,43 +2,55 @@ name: Python uv CI
 
 on:
   workflow_call:
+    inputs:
+      app_client_id:
+        description: GitHub App client ID used for private dependency access.
+        required: true
+        type: string
+      app_token_repositories:
+        description: Comma or newline-separated repositories the GitHub App token may access.
+        required: true
+        type: string
+    secrets:
+      app_private_key:
+        description: GitHub App private key used to create an installation token.
+        required: true
 
 permissions:
   contents: read
+
+defaults:
+  run:
+    shell: bash
 
 jobs:
   test:
     name: uv test
     runs-on: ubuntu-latest
+    timeout-minutes: 30
+
+    # Do not expose the GitHub App private key / installation token to forked PR code.
+    # Same-repository PRs and non-PR events still run.
+    if: ${{ startsWith(github.event_name, 'pull_request') == false || github.event.pull_request.head.repo.full_name == github.repository }}
+
+    permissions:
+      contents: read
 
     steps:
       - name: Validate required configuration
         env:
-          APP_CLIENT_ID: ${{ vars.APP_CLIENT_ID }}
-          APP_PRIVATE_KEY: ${{ secrets.APP_PRIVATE_KEY }}
-          APP_TOKEN_REPOSITORIES: ${{ vars.APP_TOKEN_REPOSITORIES }}
+          APP_CLIENT_ID: ${{ inputs.app_client_id }}
+          APP_PRIVATE_KEY: ${{ secrets.app_private_key }}
+          APP_TOKEN_REPOSITORIES: ${{ inputs.app_token_repositories }}
         run: |
-          test -n "$APP_CLIENT_ID" || (echo "::error::Missing variable APP_CLIENT_ID" && exit 1)
-          test -n "$APP_PRIVATE_KEY" || (echo "::error::Missing secret APP_PRIVATE_KEY" && exit 1)
-          test -n "$APP_TOKEN_REPOSITORIES" || (echo "::error::Missing variable APP_TOKEN_REPOSITORIES" && exit 1)
+          test -n "$APP_CLIENT_ID" || { echo "::error::Missing input app_client_id"; exit 1; }
+          test -n "$APP_PRIVATE_KEY" || { echo "::error::Missing secret app_private_key"; exit 1; }
+          test -n "$APP_TOKEN_REPOSITORIES" || { echo "::error::Missing input app_token_repositories"; exit 1; }
 
       - name: Checkout
         uses: actions/checkout@v6
         with:
           persist-credentials: false
-
-      - name: Create GitHub App token
-        uses: actions/create-github-app-token@v3
-        id: app-token
-        with:
-          client-id: ${{ vars.APP_CLIENT_ID }}
-          private-key: ${{ secrets.APP_PRIVATE_KEY }}
-          owner: ${{ github.repository_owner }}
-          repositories: ${{ vars.APP_TOKEN_REPOSITORIES }}
-
-      - name: Configure Git auth for private dependencies
-        run: |
-          git config --global url."https://x-access-token:${{ steps.app-token.outputs.token }}@github.com/".insteadOf "https://github.com/"
 
       - name: Install uv
         uses: astral-sh/setup-uv@v8.2.0
@@ -48,8 +60,28 @@ jobs:
       - name: Install Python
         run: uv python install
 
+      - name: Create GitHub App token
+        uses: actions/create-github-app-token@v3
+        id: app-token
+        with:
+          client-id: ${{ inputs.app_client_id }}
+          private-key: ${{ secrets.app_private_key }}
+          owner: ${{ github.repository_owner }}
+          repositories: ${{ inputs.app_token_repositories }}
+          permission-contents: read
+          skip-token-revoke: false
+
       - name: Sync dependencies
-        run: uv sync --frozen
+        run: |
+          token='${{ steps.app-token.outputs.token }}'
+
+          GIT_TERMINAL_PROMPT=0 \
+          GIT_CONFIG_COUNT=1 \
+          GIT_CONFIG_KEY_0="url.https://x-access-token:${token}@github.com/.insteadOf" \
+          GIT_CONFIG_VALUE_0="https://github.com/" \
+          uv sync --frozen
+
+          unset token
 
       - name: Lint
         run: uv run ruff check .
@@ -62,16 +94,12 @@ jobs:
 
       - name: Upload coverage artifact
         uses: actions/upload-artifact@v4
-        if: github.event_name == 'pull_request' || github.ref == format('refs/heads/{0}', github.event.repository.default_branch)
+        if: ${{ github.event_name == 'pull_request' || github.ref == format('refs/heads/{0}', github.event.repository.default_branch) }}
         with:
           name: coverage-markdown
           path: coverage-report.md
           if-no-files-found: error
           retention-days: 1
-
-      - name: Cleanup Git auth
-        if: always()
-        run: git config --global --unset-all url."https://x-access-token:${{ steps.app-token.outputs.token }}@github.com/".insteadOf || true
 
       - name: Minimize uv cache
         if: always()
@@ -81,7 +109,10 @@ jobs:
     name: Publish Coverage
     needs: test
     runs-on: ubuntu-latest
-    if: github.event_name == 'pull_request' || github.ref == format('refs/heads/{0}', github.event.repository.default_branch)
+    timeout-minutes: 10
+
+    if: ${{ needs.test.result == 'success' && (github.event_name == 'pull_request' || github.ref == format('refs/heads/{0}', github.event.repository.default_branch)) }}
+
     permissions:
       contents: read
       pull-requests: write
@@ -94,12 +125,12 @@ jobs:
 
       - name: Publish to Job Summary
         run: |
-          echo "## 📊 Code Coverage Report" >> $GITHUB_STEP_SUMMARY
-          cat coverage-report.md >> $GITHUB_STEP_SUMMARY
+          echo "## 📊 Code Coverage Report" >> "$GITHUB_STEP_SUMMARY"
+          cat coverage-report.md >> "$GITHUB_STEP_SUMMARY"
 
       - name: Add Coverage PR Comment
         uses: actions/github-script@v7
-        if: github.event_name == 'pull_request'
+        if: ${{ github.event_name == 'pull_request' }}
         with:
           script: |
             const fs = require('fs');
