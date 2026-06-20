@@ -1,0 +1,6 @@
+{
+  "name": "Python uv CI",
+  "description": "Run uv sync, ruff, mypy, pytest, and publish PR coverage comments.",
+  "iconName": "python",
+  "categories": ["Python", "continuous-integration"]
+}
